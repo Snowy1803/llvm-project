@@ -2631,9 +2631,21 @@ Value *llvm::salvageDebugInfoImpl(Instruction &I, uint64_t CurrentLocOps,
   if (auto *IC = dyn_cast<ICmpInst>(&I))
     return getSalvageOpsForIcmpOp(IC, CurrentLocOps, Ops, AdditionalValues);
 
-  // *Not* to do: we should not attempt to salvage load instructions,
-  // because the validity and lifetime of a dbg.value containing
+  // *Not* to do: we should not attempt to salvage load instructions in
+  // general, because the validity and lifetime of a dbg.value containing
   // DW_OP_deref becomes difficult to analyze. See PR40628 for examples.
+  //
+  // However, loads marked with !dbg.salvageable.load by the frontend are
+  // safe to salvage: the frontend guarantees the address is valid at the
+  // debug point.  Replace the load with its address operand and append
+  // DW_OP_deref so the debugger dereferences it at evaluation time.
+  if (auto *LI = dyn_cast<LoadInst>(&I)) {
+    if (LI->getMetadata(LLVMContext::MD_dbg_salvageable_load)) {
+      Ops.push_back(dwarf::DW_OP_deref);
+      return LI->getPointerOperand();
+    }
+    return nullptr;
+  }
 
   if (auto *IInst = dyn_cast<llvm::IntrinsicInst>(&I))
     if (IInst->getIntrinsicID() == Intrinsic::ptrauth_auth)
